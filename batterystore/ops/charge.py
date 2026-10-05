@@ -31,12 +31,12 @@ def charge_rack(
     violations: list[str] = []
 
     derate_ratio = temp.charge_limit_ratio()
+    gate = balance.gate(rack.rating_epoch)
     plan = bms.charge_plan(
         rack,
         pcs.limits,
-        balance_complete=balance.is_complete(),
+        balance_gate=gate,
         temp_derate_ratio=derate_ratio,
-        balance_min_delta_mv=balance.limits.target_delta_mv,
     )
     flow.append({"component": "bms", "action": "charge_plan", "detail": plan.as_dict()})
     if not plan.allowed:

@@ -1,7 +1,9 @@
 """均衡脉冲节拍。
 
 均衡按"放电脉冲 + 静置"交替推进：脉冲段给被选中的单体放电，静置段让电压
-回落。持续时长超过上限即判中止，避免一个压差始终不收敛的簇把均衡跑到失控。
+回落。兜底有两道：脉冲轮次用尽或持续时长超上限都判中止，避免一个压差始终
+不收敛的簇把均衡跑到失控——轮次用尽是主兜底（先到先判），时长上限防的是
+异常大的步长。
 """
 
 from __future__ import annotations
@@ -65,6 +67,16 @@ class BalanceRun:
 
         return self._pulses
 
+    def pulses_remaining(self) -> int:
+        """返回剩余脉冲轮次。"""
+
+        return self._limits.pulses_remaining(self._pulses)
+
+    def pulses_exhausted(self) -> bool:
+        """脉冲轮次是否已用尽。"""
+
+        return self._pulses >= self._limits.max_pulses
+
     def overrun(self) -> bool:
         """是否超过时长上限。"""
 
@@ -76,8 +88,11 @@ class BalanceRun:
         return {
             "targets": len(self._targets),
             "pulses": self._pulses,
+            "max_pulses": self._limits.max_pulses,
+            "pulses_remaining": self.pulses_remaining(),
             "cycle_s": self._limits.cycle_s,
             "elapsed_s": round(self._elapsed_s, 2),
             "phase": self._phase,
+            "pulses_exhausted": self.pulses_exhausted(),
             "overrun": self.overrun(),
         }

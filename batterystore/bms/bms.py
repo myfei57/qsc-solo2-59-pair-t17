@@ -128,20 +128,18 @@ class Bms:
         rack: Rack,
         pcs_limits: PcsLimits,
         *,
-        balance_complete: bool,
+        balance_gate: dict,
         temp_derate_ratio: float,
-        balance_min_delta_mv: float,
     ) -> ChargePlan:
-        """按均衡、降额与电压裕度构造充电计划。"""
+        """按均衡联锁、降额与电压裕度构造充电计划。"""
 
         return build_charge_plan(
             rack,
             pcs_limits,
             self._limits,
             self._rack_limits,
-            balance_complete=balance_complete,
+            balance_gate=balance_gate,
             temp_derate_ratio=temp_derate_ratio,
-            balance_min_delta_mv=balance_min_delta_mv,
             delta_mv=rack.metrics().delta_mv,
         )
 

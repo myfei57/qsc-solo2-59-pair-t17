@@ -66,12 +66,41 @@ def test_protection_lists_violations(platform):
 
 def test_charge_plan_blocks_before_balance(platform):
     rack = platform.racks["rk-01"]
+    gate = platform.balancer.gate(rack.rating_epoch)
     plan = platform.bms.charge_plan(
         rack,
         platform.pcs.limits,
-        balance_complete=False,
+        balance_gate=gate,
         temp_derate_ratio=1.0,
-        balance_min_delta_mv=platform.config.balance.target_delta_mv,
     )
     assert not plan.allowed
     assert "balance_incomplete" in plan.as_dict()["reasons"]
+
+
+def test_charge_plan_blocks_when_balance_aborted(platform):
+    rack = platform.racks["rk-01"]
+    platform.balancer.start(rack.cells(), rating_epoch=rack.rating_epoch)
+    platform.balancer.state.transition("aborted", "duration_exceeded")
+    plan = platform.bms.charge_plan(
+        rack,
+        platform.pcs.limits,
+        balance_gate=platform.balancer.gate(rack.rating_epoch),
+        temp_derate_ratio=1.0,
+    )
+    assert not plan.allowed
+    assert plan.as_dict()["reasons"] == ["balance_aborted"]
+    assert plan.as_dict()["balance"]["abort_reason"] == "duration_exceeded"
+
+
+def test_charge_plan_blocks_when_balance_epoch_stale(platform):
+    rack = platform.racks["rk-01"]
+    platform.balancer.start(rack.cells(), rating_epoch=rack.rating_epoch)
+    platform.balancer.state.transition("complete", "delta_within_target")
+    plan = platform.bms.charge_plan(
+        rack,
+        platform.pcs.limits,
+        balance_gate=platform.balancer.gate(rack.rating_epoch + 1),
+        temp_derate_ratio=1.0,
+    )
+    assert not plan.allowed
+    assert "balance_rating_invalidated" in plan.as_dict()["reasons"]

@@ -69,6 +69,7 @@
       "target_delta_mv": 25.0,
       "pulse_s": 4.0,
       "rest_s": 2.0,
+      "max_pulses": 300,
       "max_duration_s": 600.0,
       "min_cells": 2
     },

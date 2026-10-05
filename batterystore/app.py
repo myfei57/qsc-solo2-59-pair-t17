@@ -364,27 +364,32 @@ class Platform:
             return {**report, **summary}
 
     def balance(self, rack_id: str | None = None, dt: float = 2.0, max_steps: int = 400) -> dict:
-        """跑一次均衡直到压差回到目标带内或超时中止。"""
+        """跑一次均衡直到压差回到目标带内或兜底中止（轮次用尽/超时）。"""
 
         with self._lock:
             op_id = self.ids.next()
             rack = self._rack(rack_id)
-            started = self.balancer.start(rack.cells())
+            started = self.balancer.start(rack.cells(), rating_epoch=rack.rating_epoch)
             steps: list[dict] = [{"component": "balance", "action": "start", "detail": started}]
             progressed: list[dict] = []
             for _ in range(max_steps):
                 if self.balancer.is_complete() or self.balancer.state.state == "aborted":
                     break
                 progressed.append(self.balancer.advance(dt, rack.cells()))
-            violations = [] if self.balancer.is_complete() else ["balance_incomplete"]
+            gate = self.balancer.gate(rack.rating_epoch)
+            violations = [] if gate["passed"] else [gate["reason"]]
             steps.append(
                 {
                     "component": "balance",
                     "action": "advance",
                     "detail": {
                         "rounds": len(progressed),
-                        "delta_mv": round(self.balancer.delta_mv(), 2),
-                        "state": self.balancer.state.state,
+                        "state": gate["state"],
+                        "abort_reason": gate["abort_reason"],
+                        "delta_mv": gate["delta_mv"],
+                        "target_delta_mv": gate["target_delta_mv"],
+                        "remaining_mv": gate["remaining_mv"],
+                        "pulses_remaining": gate["pulses_remaining"],
                     },
                 }
             )
@@ -422,16 +427,18 @@ class Platform:
             return {**report, **summary, "charge_limit_ratio": round(ratio, 4)}
 
     def replace_pack_rating(self, pack_index: int = 0, rating_v: float = 3.35, rack_id: str | None = None) -> dict:
-        """更换整包电芯并立即刷新降额基线。"""
+        """更换整包电芯并立即刷新降额基线、作废旧均衡判据。"""
 
         with self._lock:
             op_id = self.ids.next()
             rack = self._rack(rack_id)
             change = rack.replace_pack_rating(pack_index, rating_v)
             baseline = self.temp.apply_temperature(rack.temperature_c(), self.clock.now(), rack.rating_v(), rack.rating_epoch)
+            invalidated = self.balancer.invalidate(rack.rating_epoch)
             steps = [
                 {"component": "rack", "action": "replace_pack", "detail": change},
                 {"component": "temp", "action": "baseline_refresh", "detail": baseline},
+                {"component": "balance", "action": "criterion_invalidated", "detail": invalidated},
             ]
             report = {"station": self.station, "ok": True, "steps": steps, "violations": []}
             summary = self._record_operation(op_id, "replace_pack", report)

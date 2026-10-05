@@ -286,11 +286,16 @@ class SocLimits:
 
 @dataclass(frozen=True)
 class BalanceLimits:
-    """均衡压差目标、脉冲节拍与时长上限。"""
+    """均衡压差目标、脉冲节拍、轮次上限与时长上限。
+
+    完成判据以"压差回到目标带"为准（更准），``max_pulses`` 只是兜底：碰上不
+    收敛的簇，轮次用尽即判中止而不是完成，避免一个簇无限期跑下去。
+    """
 
     target_delta_mv: float
     pulse_s: float
     rest_s: float
+    max_pulses: int
     max_duration_s: float
     min_cells: int
 
@@ -300,6 +305,7 @@ class BalanceLimits:
             target_delta_mv=_number(section, "target_delta_mv", minimum=0.0),
             pulse_s=_number(section, "pulse_s", minimum=0.1),
             rest_s=_number(section, "rest_s", minimum=0.0),
+            max_pulses=_integer(section, "max_pulses", minimum=1),
             max_duration_s=_number(section, "max_duration_s", minimum=1.0),
             min_cells=_integer(section, "min_cells", minimum=1),
         )
@@ -309,6 +315,11 @@ class BalanceLimits:
         """一个脉冲加一段静置的时长。"""
 
         return self.pulse_s + self.rest_s
+
+    def pulses_remaining(self, pulses: int) -> int:
+        """还剩多少个脉冲轮次。"""
+
+        return max(0, self.max_pulses - int(pulses))
 
 
 @dataclass(frozen=True)
@@ -401,7 +412,7 @@ def default_config() -> StationConfig:
         fire=FireLimits(1200.0, 58.0, 30.0, 4.0, 60.0, 4),
         grid=GridLimits(400.0, 450.0, 50.0, 0.2, 10.0),
         soc=SocLimits(280.0, 0.98, 7200.0, 3.0, 50.0),
-        balance=BalanceLimits(25.0, 4.0, 2.0, 600.0, 2),
+        balance=BalanceLimits(25.0, 4.0, 2.0, 300, 600.0, 2),
         quota=QuotaLimits(24.0, 2000.0, 2000.0, 1.2, 0.4),
     )
 
@@ -477,6 +488,7 @@ def config_to_mapping(cfg: StationConfig) -> dict:
                 "target_delta_mv": cfg.balance.target_delta_mv,
                 "pulse_s": cfg.balance.pulse_s,
                 "rest_s": cfg.balance.rest_s,
+                "max_pulses": cfg.balance.max_pulses,
                 "max_duration_s": cfg.balance.max_duration_s,
                 "min_cells": cfg.balance.min_cells,
             },
