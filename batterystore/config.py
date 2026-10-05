@@ -286,22 +286,41 @@ class SocLimits:
 
 @dataclass(frozen=True)
 class BalanceLimits:
-    """均衡压差目标、脉冲节拍与时长上限。"""
+    """均衡压差目标、脉冲节拍、完成判据与时长上限。
+
+    完成判据二选一：
+
+    * ``completion_policy="delta"``：压差回到目标带即完成（更准）；脉冲轮次用尽
+      仍不收敛判中止，避免一个不收敛的簇一直跑；
+    * ``completion_policy="pulses"``：脉冲轮次用尽即完成（兜底策略，不依赖收敛
+      结果），但用尽时压差还越带，说明均衡没把低压单体补平，判中止而不是完成，
+      充电不得拿"轮次跑满"当通行证。
+
+    两种策略下时长上限都是硬中止：时钟超了一律 ``aborted``，状态明确，不会被
+    充电当成通过。
+    """
 
     target_delta_mv: float
     pulse_s: float
     rest_s: float
     max_duration_s: float
     min_cells: int
+    max_pulses: int
+    completion_policy: str
 
     @classmethod
     def from_mapping(cls, section: Mapping[str, Any]) -> "BalanceLimits":
+        policy = section.get("completion_policy", "delta")
+        if policy not in ("delta", "pulses"):
+            raise ConfigError("completion_policy 只能是 delta 或 pulses", component="config")
         return cls(
             target_delta_mv=_number(section, "target_delta_mv", minimum=0.0),
             pulse_s=_number(section, "pulse_s", minimum=0.1),
             rest_s=_number(section, "rest_s", minimum=0.0),
             max_duration_s=_number(section, "max_duration_s", minimum=1.0),
             min_cells=_integer(section, "min_cells", minimum=1),
+            max_pulses=_integer(section, "max_pulses", minimum=1),
+            completion_policy=policy,
         )
 
     @property
@@ -401,7 +420,7 @@ def default_config() -> StationConfig:
         fire=FireLimits(1200.0, 58.0, 30.0, 4.0, 60.0, 4),
         grid=GridLimits(400.0, 450.0, 50.0, 0.2, 10.0),
         soc=SocLimits(280.0, 0.98, 7200.0, 3.0, 50.0),
-        balance=BalanceLimits(25.0, 4.0, 2.0, 600.0, 2),
+        balance=BalanceLimits(25.0, 4.0, 2.0, 600.0, 2, 120, "delta"),
         quota=QuotaLimits(24.0, 2000.0, 2000.0, 1.2, 0.4),
     )
 
@@ -479,6 +498,8 @@ def config_to_mapping(cfg: StationConfig) -> dict:
                 "rest_s": cfg.balance.rest_s,
                 "max_duration_s": cfg.balance.max_duration_s,
                 "min_cells": cfg.balance.min_cells,
+                "max_pulses": cfg.balance.max_pulses,
+                "completion_policy": cfg.balance.completion_policy,
             },
             "quota": {
                 "period_hours": cfg.quota.period_hours,

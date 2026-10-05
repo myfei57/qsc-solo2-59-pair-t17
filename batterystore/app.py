@@ -364,32 +364,67 @@ class Platform:
             return {**report, **summary}
 
     def balance(self, rack_id: str | None = None, dt: float = 2.0, max_steps: int = 400) -> dict:
-        """跑一次均衡直到压差回到目标带内或超时中止。"""
+        """跑一次均衡直到压差回到目标带内、轮次用尽或超时中止。
+
+        完成判据由配置决定（压差回带 / 脉冲轮次用尽）；被中止或因换芯作废
+        时报告不为 ok，且状态明确落在 aborted / idle，充电不会把它当通过。
+        """
 
         with self._lock:
             op_id = self.ids.next()
             rack = self._rack(rack_id)
-            started = self.balancer.start(rack.cells())
+            started = self.balancer.start(rack.cells(), rack_id=rack.rack_id, rating_epoch=rack.rating_epoch)
             steps: list[dict] = [{"component": "balance", "action": "start", "detail": started}]
             progressed: list[dict] = []
+            finish_reason: str | None = None
             for _ in range(max_steps):
-                if self.balancer.is_complete() or self.balancer.state.state == "aborted":
+                if self.balancer.state.state != "running":
                     break
-                progressed.append(self.balancer.advance(dt, rack.cells()))
-            violations = [] if self.balancer.is_complete() else ["balance_incomplete"]
+                beat = self.balancer.advance(dt, rack.cells())
+                progressed.append(beat)
+                finish_reason = beat.get("finish_reason")
+            if finish_reason is None and self.balancer.state.state in ("complete", "aborted"):
+                finish_reason = self.balancer.state.terminal_reason()
+            state = self.balancer.state.state
+            violations = []
+            if state == "aborted":
+                violations.append(f"balance_aborted:{finish_reason or 'unknown'}")
+            elif state != "complete":
+                # 步数预算先耗尽而判据还没结束：保持 running，等下一轮，不放行。
+                violations.append("balance_incomplete")
             steps.append(
                 {
                     "component": "balance",
                     "action": "advance",
                     "detail": {
                         "rounds": len(progressed),
+                        "state": state,
+                        "finish_reason": finish_reason,
                         "delta_mv": round(self.balancer.delta_mv(), 2),
-                        "state": self.balancer.state.state,
+                        "remaining_mv": round(self.balancer.remaining_mv(), 2),
+                        "target_delta_mv": self.config.balance.target_delta_mv,
+                        "pulses_left": progressed[-1]["run"]["pulses_left"] if progressed else None,
                     },
                 }
             )
             report = {"station": self.station, "ok": not violations, "steps": steps, "violations": violations}
             summary = self._record_operation(op_id, "balance", report)
+            return {**report, **summary}
+
+    def abort_balance(self, rack_id: str | None = None) -> dict:
+        """人工中止均衡：状态明确落在 aborted，充电联锁不放行。
+
+        中止请求本身按成功记账（操作员动作落地），充电是否放行由
+        :meth:`Balancer.gate` 独立核对。
+        """
+
+        with self._lock:
+            op_id = self.ids.next()
+            rack = self._rack(rack_id)
+            result = self.balancer.abort("manual_abort")
+            steps = [{"component": "balance", "action": "abort", "detail": {**result, "rack_id": rack.rack_id}}]
+            report = {"station": self.station, "ok": True, "steps": steps, "violations": []}
+            summary = self._record_operation(op_id, "abort_balance", report)
             return {**report, **summary}
 
     def sample_temperature(self, rack_id: str | None = None, temperature_c: float = 30.0, dt: float = 5.0) -> dict:
@@ -428,6 +463,11 @@ class Platform:
             op_id = self.ids.next()
             rack = self._rack(rack_id)
             change = rack.replace_pack_rating(pack_index, rating_v)
+            # 换芯即换额定值：无论均衡是否已完成，旧判据一律作废，必须按新
+            # 额定值重新均衡，不能拿旧结论给充电放行。作废记录并入换芯步骤，
+            # 审计链上一步看清"换芯 → 均衡判据失效"。
+            invalidated = self.balancer.invalidate("pack_rating_replaced")
+            change["balance_verdict"] = invalidated
             baseline = self.temp.apply_temperature(rack.temperature_c(), self.clock.now(), rack.rating_v(), rack.rating_epoch)
             steps = [
                 {"component": "rack", "action": "replace_pack", "detail": change},

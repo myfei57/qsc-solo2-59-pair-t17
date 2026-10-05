@@ -70,7 +70,9 @@
       "pulse_s": 4.0,
       "rest_s": 2.0,
       "max_duration_s": 600.0,
-      "min_cells": 2
+      "min_cells": 2,
+      "max_pulses": 120,
+      "completion_policy": "delta"
     },
     "quota": {
       "period_hours": 24.0,

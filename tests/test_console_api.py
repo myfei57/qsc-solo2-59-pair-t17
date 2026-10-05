@@ -84,6 +84,18 @@ def test_console_actions_and_errors(platform):
         assert code == 200
         code, payload = _post(base_url, "/api/charge", {"steps": 2, "dt": 60.0})
         assert code == 200
+        # 中止端点：中止后状态必须明确是 aborted，后续充电被门拒绝。
+        code, payload = _post(base_url, "/api/disturb", {"cell_index": 0, "delta_v": 0.05})
+        assert code == 200
+        code, payload = _post(base_url, "/api/balance", {"max_steps": 1})
+        assert code == 200
+        code, payload = _post(base_url, "/api/balance/abort", {})
+        assert code == 200
+        assert payload["steps"][0]["detail"]["state"] == "aborted"
+        code, blocked = _post(base_url, "/api/charge", {"steps": 1})
+        assert code == 200
+        assert blocked["ok"] is False
+        assert "balance_aborted" in blocked["violations"]
         code, payload = _post(base_url, "/api/disturb", {"cell_index": 3, "delta_v": 0.02})
         assert code == 200
         code, payload = _post(base_url, "/api/calibrate", {"soc_pct": 55.0})

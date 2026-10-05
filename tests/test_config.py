@@ -53,3 +53,25 @@ def test_config_rejects_current_above_protection():
     raw["limits"]["pcs"]["protection_current_a"] = 100.0
     with pytest.raises(ConfigError):
         StationConfig.from_mapping(raw)
+
+
+def test_config_rejects_unknown_balance_completion_policy():
+    raw = config_to_mapping(default_config())
+    raw["limits"]["balance"]["completion_policy"] = "maybe"
+    with pytest.raises(ConfigError):
+        StationConfig.from_mapping(raw)
+
+
+def test_config_defaults_to_delta_policy_with_pulse_budget():
+    config = default_config()
+    assert config.balance.completion_policy == "delta"
+    assert config.balance.max_pulses >= 1
+
+
+def test_config_roundtrip_keeps_balance_policy_and_budget():
+    raw = config_to_mapping(default_config())
+    raw["limits"]["balance"]["completion_policy"] = "pulses"
+    raw["limits"]["balance"]["max_pulses"] = 42
+    reloaded = StationConfig.from_mapping(raw)
+    assert reloaded.balance.completion_policy == "pulses"
+    assert reloaded.balance.max_pulses == 42

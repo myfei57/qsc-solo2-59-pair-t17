@@ -88,6 +88,7 @@ class Api:
         add("POST", "/api/discharge", self._discharge)
         add("POST", "/api/charge", self._charge)
         add("POST", "/api/balance", self._balance)
+        add("POST", "/api/balance/abort", self._balance_abort)
         add("POST", "/api/temperature", self._temperature)
         add("POST", "/api/replace-pack", self._replace_pack)
         add("POST", "/api/calibrate", self._calibrate)
@@ -205,6 +206,9 @@ class Api:
             dt=_as_float(body, "dt", 2.0),
             max_steps=_as_int(body, "max_steps", 400),
         )
+
+    def _balance_abort(self, params: dict, body: dict) -> dict:
+        return self._platform.abort_balance(rack_id=body.get("rack_id"))
 
     def _temperature(self, params: dict, body: dict) -> dict:
         return self._platform.sample_temperature(

@@ -131,6 +131,7 @@ class Bms:
         balance_complete: bool,
         temp_derate_ratio: float,
         balance_min_delta_mv: float,
+        balance_gate: dict | None = None,
     ) -> ChargePlan:
         """按均衡、降额与电压裕度构造充电计划。"""
 
@@ -143,6 +144,7 @@ class Bms:
             temp_derate_ratio=temp_derate_ratio,
             balance_min_delta_mv=balance_min_delta_mv,
             delta_mv=rack.metrics().delta_mv,
+            balance_gate=balance_gate,
         )
 
     def alarm_report(self, rack: Rack, mapping: RackMapping, delta_mv_limit: float) -> list[dict]:

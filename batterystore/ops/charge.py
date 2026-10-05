@@ -31,15 +31,20 @@ def charge_rack(
     violations: list[str] = []
 
     derate_ratio = temp.charge_limit_ratio()
+    gate = balance.gate(rack.rack_id, rack.rating_epoch, rack.cells())
+    flow.append({"component": "balance", "action": "charge_gate", "detail": dict(gate)})
     plan = bms.charge_plan(
         rack,
         pcs.limits,
-        balance_complete=balance.is_complete(),
+        balance_complete=gate["passed"],
         temp_derate_ratio=derate_ratio,
         balance_min_delta_mv=balance.limits.target_delta_mv,
+        balance_gate=gate,
     )
     flow.append({"component": "bms", "action": "charge_plan", "detail": plan.as_dict()})
     if not plan.allowed:
+        # 门给出的精确原因（running/aborted/not_run/stale…）已在计划里，
+        # "当前压差、距目标带还差多少"留在上面的 charge_gate 审计步骤。
         return {"station": station, "ok": False, "steps": flow, "violations": list(plan.reasons)}
 
     derate = pcs.apply_derate(temperature=derate_ratio, grid=1.0)
